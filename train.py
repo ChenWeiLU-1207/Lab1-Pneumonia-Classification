@@ -33,37 +33,60 @@ def measurement(outputs, labels, smooth=1e-10):
             fn += 1
     return tp, tn, fp, fn
 
-def plot_accuracy(train_acc_list, test_acc_list, model_name):
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_acc_list, label='Train Accuracy', marker='o')
-    plt.plot(test_acc_list, label='Test Accuracy', marker='s')
-    plt.title(f'{model_name.upper()} Training and Testing Accuracy')
-    plt.xlabel('Epochs')
-    plt.ylabel('Accuracy (%)')
-    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.legend()
+# ================= 關鍵修改開始 =================
+def plot_training_curves(train_acc_list, train_f1_list, model_name):
+    """繪製 Training Accuracy & F1-score 曲線 (對應新版 Spec 3.b.i)"""
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+
+    color = 'tab:blue'
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Training Accuracy (%)', color=color)
+    ax1.plot(train_acc_list, label='Train Accuracy', color=color, marker='o')
+    ax1.tick_params(axis='y', labelcolor=color)
+    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    ax2 = ax1.twinx()  
+    color = 'tab:green'
+    ax2.set_ylabel('Training F1-Score', color=color)  
+    ax2.plot(train_f1_list, label='Train F1-Score', color=color, marker='^', linestyle='--')
+    ax2.tick_params(axis='y', labelcolor=color)
+
+    plt.title(f'{model_name.upper()} Training Curves')
+    fig.tight_layout()
     plt.grid(True)
-    plt.savefig(f'{model_name}_accuracy_curve.png')
+    plt.savefig(f'{model_name}_training_curves.png')
     plt.close()
 
-def plot_f1_score(f1_score_list, model_name):
-    plt.figure(figsize=(10, 5))
-    plt.plot(f1_score_list, label='Test F1-Score', color='green', marker='^')
-    plt.title(f'{model_name.upper()} Testing F1-Score Trend')
-    plt.xlabel('Epochs')
-    plt.ylabel('F1-Score')
-    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.legend()
+def plot_validation_curves(val_acc_list, val_f1_list, model_name):
+    """繪製 Validation Accuracy & F1-score 曲線 (對應新版 Spec 3.b.ii Bonus)"""
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+
+    color = 'tab:orange'
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Validation Accuracy (%)', color=color)
+    ax1.plot(val_acc_list, label='Val Accuracy', color=color, marker='s')
+    ax1.tick_params(axis='y', labelcolor=color)
+    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    ax2 = ax1.twinx()  
+    color = 'tab:red'
+    ax2.set_ylabel('Validation F1-Score', color=color)  
+    ax2.plot(val_f1_list, label='Val F1-Score', color=color, marker='D', linestyle='--')
+    ax2.tick_params(axis='y', labelcolor=color)
+
+    plt.title(f'{model_name.upper()} Validation Curves (Bonus)')
+    fig.tight_layout()
     plt.grid(True)
-    plt.savefig(f'{model_name}_f1_score_curve.png')
+    plt.savefig(f'{model_name}_validation_curves.png')
     plt.close()
+# ================= 關鍵修改結束 =================
 
 def plot_confusion_matrix(confusion_matrix, model_name):
     plt.figure(figsize=(8, 6))
     sns.heatmap(confusion_matrix, annot=True, fmt='d', cmap='rocket', 
                 xticklabels=['Normal', 'Pneumonia'], 
                 yticklabels=['Normal', 'Pneumonia'])
-    plt.title(f'{model_name.upper()} Confusion Matrix')
+    plt.title(f'{model_name.upper()} Final Test Confusion Matrix')
     plt.ylabel('Actual Label')
     plt.xlabel('Predicted Label')
     plt.savefig(f'{model_name}_confusion_matrix.png')
@@ -72,9 +95,10 @@ def plot_confusion_matrix(confusion_matrix, model_name):
 def train(device, train_loader, test_loader, model, criterion, optimizer, scheduler, num_epochs, model_name):
     best_acc = 0.0
     best_c_matrix = []
-    train_acc_list = []
-    test_acc_list = []
-    f1_score_list = []
+    
+    # 儲存紀錄的 List 更新
+    train_acc_list, train_f1_list = [], []
+    test_acc_list, test_f1_list = [], []
 
     for epoch in range(1, num_epochs+1):
         model.train()
@@ -104,17 +128,24 @@ def train(device, train_loader, test_loader, model, criterion, optimizer, schedu
             avg_loss /= len(train_loader)
             train_acc = (tp+tn) / (tp+tn+fp+fn) * 100
             
+            # 計算 Training 的 F1-Score
+            t_precision = tp / (tp+fp) if (tp+fp) > 0 else 0
+            t_recall = tp / (tp+fn) if (tp+fn) > 0 else 0
+            train_f1 = (2*t_precision*t_recall) / (t_precision+t_recall) if (t_precision+t_recall) > 0 else 0
+            
             print(f'\nEpoch: {epoch}')
             print(f'↳ Loss: {avg_loss:.4f}')
-            print(f'↳ Training Acc.(%): {train_acc:.2f}%')
+            print(f'↳ Training Acc.(%): {train_acc:.2f}% | Training F1: {train_f1:.4f}')
             print(f'↳ Current LR: {optimizer.param_groups[0]["lr"]:.6f}')
 
-        test_acc, f1_score, c_matrix = test(device, test_loader, model)
+        test_acc, test_f1, c_matrix = test(device, test_loader, model)
         scheduler.step()
 
+        # 紀錄歷史軌跡
         train_acc_list.append(train_acc)
+        train_f1_list.append(train_f1)
         test_acc_list.append(test_acc)
-        f1_score_list.append(f1_score)
+        test_f1_list.append(test_f1)
         
         if test_acc > best_acc:
             best_acc = test_acc
@@ -122,7 +153,7 @@ def train(device, train_loader, test_loader, model, criterion, optimizer, schedu
             torch.save(model.state_dict(), f'best_{model_name}_weights.pt')
             print(f'* Updated New Weight (Highest Test Acc: {best_acc:.2f}%)')
 
-    return train_acc_list, test_acc_list, f1_score_list, best_c_matrix
+    return train_acc_list, train_f1_list, test_acc_list, test_f1_list, best_c_matrix
 
 def test(device, test_loader, model):
     val_acc = 0.0
@@ -149,8 +180,8 @@ def test(device, test_loader, model):
         precision = tp / (tp+fp) if (tp+fp) > 0 else 0
         f1_score = (2*tp) / (2*tp+fp+fn) if (2*tp+fp+fn) > 0 else 0
         
-        print (f'↳ Recall: {recall:.4f}, Precision: {precision:.4f}, F1-score: {f1_score:.4f}')
-        print (f'↳ Test Acc.(%): {val_acc:.2f}%')
+        print (f'↳ Val Recall: {recall:.4f}, Val Precision: {precision:.4f}, Val F1-score: {f1_score:.4f}')
+        print (f'↳ Val Acc.(%): {val_acc:.2f}%')
 
     return val_acc, f1_score, c_matrix
 
@@ -217,15 +248,16 @@ if __name__ == '__main__':
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_epochs)
 
-        train_acc, test_acc, f1_list, best_c_matrix = train(
+        train_acc, train_f1, val_acc, val_f1, best_c_matrix = train(
             device, train_loader, test_loader, model, criterion, optimizer, scheduler, args.num_epochs, model_name
         )
 
-        plot_accuracy(train_acc, test_acc, model_name)
-        plot_f1_score(f1_list, model_name)
+        # 呼叫更新後的繪圖函數
+        plot_training_curves(train_acc, train_f1, model_name)
+        plot_validation_curves(val_acc, val_f1, model_name)
         plot_confusion_matrix(best_c_matrix, model_name)
 
-        print(f"{model_name.upper()} Finish Training.")
+        print(f"{model_name.upper()} Finish Training. (Images saved to local directory)")
 
         del model, optimizer, criterion, scheduler
         gc.collect()
